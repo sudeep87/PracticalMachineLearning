@@ -1,0 +1,113 @@
+---
+title: "Coursera Practical Machine Learning Assignment"
+author: "Sudeep Mishra"
+date: "Sunday, June 21, 2015"
+output: html_document
+---
+
+# Proactical Machine Learning Prediction Assignment
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har.
+
+##Libraries
+```{r}
+library(caret)
+library(doParallel)
+set.seed(20150125)
+```
+
+## Loading Training Data
+The pml-training.csv data is used to devise training and testing sets during fitting of the model.
+The pml-test.csv data is used to submit 20 test cases based on the fitted model.
+```{r , eval=FALSE}
+download.file('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv', 'pml-training.csv')
+download.file('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv','pml-test.csv' )
+```
+
+## Tidying data
+Convert all blank('""'), '#DIV/0' and 'NA' values are converted to 'NA'.
+```{r}
+trainingSrc   <- read.csv('pml-training.csv', na.strings=c("NA","#DIV/0!", ""))
+testSrc       <- read.csv('pml-test.csv' , na.strings=c("NA", "#DIV/0!", ""))
+```
+
+We decided to leave columns having no more than 60% of NA values:
+```{r}
+goodVars    <- which((colSums(!is.na(trainingSrc)) >= 0.6*nrow(trainingSrc)))
+trainingSrc <- trainingSrc[,goodVars]
+testSrc     <- testSrc[,goodVars]
+```
+
+Some minor fixes to test set are needed to perform well with random forests.
+```{r}
+# remove problem id
+testSrc <- testSrc[-ncol(testSrc)]
+# fix factor levels
+testSrc$new_window <- factor(testSrc$new_window, levels=c("no","yes"))
+```
+
+Remove X and cvtd_timestamp colums from the dataset since they are not relevant
+```{r}
+trainingSrc <- trainingSrc[,-c(1,5)]
+testSrc     <- testSrc[,-c(1,5)]
+```
+
+## Partition data into training and test sets
+We are dividing data to 60% training and 40% testing sets.
+```{r}
+inTraining  <- createDataPartition(trainingSrc$classe, p = 0.6, list = FALSE)
+training    <- trainingSrc[inTraining, ]
+testing     <- trainingSrc[-inTraining, ]
+```
+
+## Fitting Random Forests 
+The outcome variable is `class` and other colums are in `data` dataframe.
+```{r}
+class <- training$classe
+data  <- training[-ncol(training)]
+```
+
+We will use Parallel Random Forest algorithm to fit the model. Note that for random forests there is no need for cross-validation to get an unbiased estimate of the test set error. It is estimated internally during the fitting process.
+
+```{r}
+registerDoParallel()
+rf <- train(data, class, method="parRF", 
+    tuneGrid=data.frame(mtry=3), 
+    trControl=trainControl(method="none"))
+rf
+```
+
+Let's plot importance of the model variables:
+```{r scatterplot, fig.width=11, fig.height=10}
+plot(varImp(rf))
+```
+
+## Confusion Matrix for testing set
+
+Predict on testing set and generate the confusion matrix for the testing set
+```{r}
+testingPredictions <- predict(rf, newdata=testing)
+confMatrix <- confusionMatrix(testingPredictions,testing$classe)
+confMatrix
+```
+
+Let's have a look at the accuracy
+```{r}
+confMatrix$overall[1]
+```
+It looks very good --- it is more then 99,5%.
+
+### Submit results of Test Set
+```{r}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+answers <- predict(rf, testSrc)
+pml_write_files(answers)
+
+```
